@@ -1,0 +1,5 @@
+# Python 3.12+; setup only. The running bridge needs no Python/PC.
+platformio==6.1.18
+pyserial==3.5
+pycryptodome==3.24.0
+aioafero==9.3.0

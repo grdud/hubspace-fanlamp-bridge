@@ -1,0 +1,25 @@
+name: Build and test
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.txt
+      - run: sudo apt-get update && sudo apt-get install -y libmbedtls-dev
+      - run: python -m unittest discover -s tests -p 'test_*.py'
+      - name: Native policy and codec tests
+        run: |
+          g++ -std=c++11 -Wall -Wextra -pedantic tests/test_fan_router.cpp -o /tmp/test-fan
+          /tmp/test-fan
+          g++ -std=c++11 -Wall -Wextra -pedantic tests/test_receiver_light.cpp -o /tmp/test-light
+          /tmp/test-light
+          g++ -std=c++11 -Iinclude tests/test_codec.cpp -lmbedcrypto -o /tmp/test-codec
+          /tmp/test-codec
+      - run: python -m platformio run
+      - run: python -m platformio run -d capture

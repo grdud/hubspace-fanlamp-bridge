@@ -1,0 +1,16 @@
+# Local identities, credentials, captures and build products
+.local/
+include/bridge_config.h
+.pio/
+capture/.pio/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.bin
+*.elf
+*.map
+*.log
+*.jsonl
+*.dpapi
+.env*
