@@ -1,7 +1,6 @@
 #pragma once
 // Non-working placeholders. tools/configure.py generates ignored bridge_config.h.
 // Never put Wi-Fi passwords or cloud tokens in this file.
-#define BRIDGE_RECEIVER_ID ""
 #define BRIDGE_SWITCH_1_ID ""
 #define BRIDGE_SWITCH_2_ID ""
 #define BRIDGE_BLE_ID 0u

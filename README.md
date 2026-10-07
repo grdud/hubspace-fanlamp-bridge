@@ -1,51 +1,37 @@
-# Hubspace → FanLamp Pro bridge
+# Hubspace → FanLamp Pro light bridge
 
-Control a FanLamp Pro ceiling fan from Hubspace using an ESP32-C3. The ESP32 receives cloud events and sends the fan's existing Bluetooth advertisement protocol. Once configured, it runs from USB power: no Home Assistant server or computer is required.
-
-This grew out of a working home project: a DC fan that spoke FanLamp Pro, a Hubspace receiver that only supported AC motors, and a desire to use the same app and kitchen dimmers for both. The useful part of the receiver turned out to be its connection to Hubspace. **The AC receiver does not drive the DC fan.**
+Use one or two Hubspace dimmer switches to control a FanLamp Pro ceiling fan's light through an ESP32-C3. The ESP32 receives switch events from Hubspace and sends Bluetooth commands directly to the fan. Once configured, it runs from USB power without a computer or Home Assistant server. **No separate Hubspace fan receiver is needed.**
 
 ```mermaid
 flowchart LR
-    A[Hubspace app / receiver remote] --> R[Genuine Hubspace receiver]
-    R --> C[Hubspace cloud]
-    S[Optional Hubspace dimmer switches] --> C
+    S[Hubspace dimmers / their app controls] --> C[Hubspace cloud]
     C --> E[ESP32-C3]
-    E -->|Bluetooth advertisements| F[FanLamp Pro fan]
-    E -. switch actions update the light tile .-> C
+    E -->|Bluetooth advertisements| L[FanLamp Pro light]
 ```
-
-For a switch action, the ESP32 sends Bluetooth directly after receiving the switch event. Updating the fan's Hubspace light tile is a separate request; the fan does not wait for that round trip. Acknowledgements of our own updates are filtered to avoid feedback loops.
 
 ## What works
 
-- Light on/off and absolute brightness; **warm white only**, with the cool channel held at zero.
-- Hubspace's four fan speeds mapped to the six-speed fan: 25/50/75/100% → speeds 1/3/4/6.
-- Comfort Breeze mapped to the fan's native breeze mode. Turning it off restores fixed-speed control; fan OFF has priority.
-- Up to two optional Hubspace dimmers control light power/brightness, with the latest cloud revision winning.
-- Switch actions update the genuine receiver's light tile in Hubspace.
-- The receiver's remote works through receiver → cloud → ESP32 → fan.
-- Credentials and the Bluetooth counter survive ESP32 restarts. Authentication refreshes automatically.
-- HTTPS requests run on a worker task while the main task continues servicing push events and Bluetooth.
+- Light on/off and absolute brightness, always warm white with the cool channel at zero.
+- One or two dimmers, with the latest cloud revision winning.
+- Configurable logical brightness minimum for each switch.
+- Duplicate Bluetooth commands are suppressed; credentials and the rolling Bluetooth counter survive restarts.
+- Live push events handle changes; REST is used for initial state and reconnection, not continuous polling.
+- No device-state writes, receiver dependency, or fan-light tile synchronization.
+
+**Fan motor control is not implemented in the current bridge.** Use the original remote or FanLamp Pro for speed and breeze. A separate Hubspace switch for motor control is planned; its behavior and compatibility are not yet defined.
 
 ## Tested hardware and scope
 
-| Part | Tested in the original installation |
+| Part | Tested installation |
 |---|---|
 | Fan | [MODERN HABITAT ABL-CFL52-CHR, 42-inch DC fan](https://www.homedepot.com/p/335493267) |
-| Hubspace receiver | [Hampton Bay 76278, four-speed AC-motor receiver](https://www.homedepot.com/p/315169181) |
 | Bridge | ESP32-C3-DevKitC-02, 4 MB flash |
-| Optional dimmers | Two Commercial Electric Hubspace smart dimmers, raw power attribute 10 and brightness attribute 20 |
+| Dimmers | Two Commercial Electric Hubspace smart dimmers, power attribute 10 and brightness attribute 20 |
 | Fan protocol | `fanlamp_pro_v2/r`, signed payload, prefix `[0x10, 0x00, 0x56]` |
 
-**This is a narrow, experimental bridge, not universal FanLamp Pro support.** An app name alone does not establish compatibility. The setup tool rejects other codec variants. Different Hubspace products may use different attributes or semantics and require code changes.
+The switch-only installation was physically confirmed working on 2026-10-06. The public setup path generalizes the installed firmware; it has not been commissioned on a second installation. This is narrow, experimental support: the FanLamp Pro app name alone does not prove protocol compatibility, and other Hubspace products may use different attributes.
 
-The original installation was tested with physical confirmation of light control, fan speeds, and native breeze. The public configuration/setup path is a generalized version of that code: it is build-tested and unit-tested, but has not been commissioned on a second installation.
-
-## Electrical boundary
-
-The ESP32 is powered only through its USB connector. **There are no GPIO connections to the receiver, fan, mains, or receiver outputs.** Keep the actual fan wired as specified by its manufacturer. Do not connect the AC-only receiver's motor output to this DC fan.
-
-The genuine receiver still needs appropriate power, an internet connection, and Hubspace registration. Arrange its mains installation according to its instructions and local requirements, using suitable enclosure, strain relief, and individually insulated unused outputs. Have a qualified electrician handle that installation if needed. This repository deliberately contains no exposed-mains bench-wiring recipe. A normal USB adapter powers the ESP32 independently.
+The ESP32 connects only to USB power. There are no GPIO connections to switches, the fan, or mains wiring. Keep the fan and switches installed according to their manufacturers' instructions.
 
 ## Build your own
 
@@ -65,7 +51,7 @@ Activate it with `.venv\Scripts\Activate.ps1` on Windows PowerShell, or `source 
 python -m pip install -r requirements.txt
 ```
 
-Set up the genuine receiver in Hubspace normally first. Confirm that your fan works with its original remote or FanLamp Pro.
+Set up one or two compatible dimmer switches in Hubspace first. Confirm that your fan works with its original remote or FanLamp Pro.
 
 ### 2. Identify your paired Bluetooth controller
 
@@ -90,9 +76,9 @@ Replace `12` below with your chosen capture record number:
 python tools/configure.py --capture .local/remote.jsonl --record 12
 ```
 
-The tool prompts for your Hubspace login (and email verification code if required), lists your devices, and lets you choose the receiver and zero, one, or two switches. It generates `include/bridge_config.h`, which Git ignores. It does **not** save cloud credentials or full device discovery data.
+The tool prompts for your Hubspace login (and email verification code if required), lists your devices, and lets you choose one required dimmer and an optional second dimmer. It generates `include/bridge_config.h`, which Git ignores. It does **not** save cloud credentials or full device discovery data.
 
-The default switch mapping is linear **1–100% → 1–100%**. A physical dimmer's low-end trim is not necessarily its logical API minimum. If you have measured a logical minimum of 30%, you can configure that explicitly with `--switch-min1 30` and/or `--switch-min2 30`. Values below that minimum clamp to 1%; do not select 30 just because the hardware trim is 30%.
+The default switch mapping is linear **1â€“100% â†’ 1â€“100%**. A physical dimmer's low-end trim is not necessarily its logical API minimum. If you have measured a logical minimum of 30%, you can configure that explicitly with `--switch-min1 30` and/or `--switch-min2 30`. Values below that minimum clamp to 1%; do not select 30 just because the hardware trim is 30%.
 
 ### 4. Install the bridge firmware
 
@@ -116,46 +102,46 @@ The ESP32 reboots and connects automatically. Optional diagnostics:
 python tools/monitor.py --port COM3 --seconds 120
 ```
 
-Look for `PUSH_CONNECTED` and `READY_BASELINE`, then test on/off, brightness, fan speeds, and Comfort Breeze. `TX` confirms a radio transmission, not that the fan received it. Check the actual fan.
+Look for `PUSH_CONNECTED` and `READY_SWITCH_ONLY`, then test light on/off and brightness from each selected switch. `TX` confirms a radio transmission, not that the fan received it. Check the actual fan.
 
 ### 6. Move it to permanent USB power
 
-Use a standard 5 V USB adapter, with good 2.4 GHz Wi-Fi coverage and Bluetooth range to the fan. Keep the real receiver online. Allow a minute or two after power-up for Wi-Fi, time synchronization, authentication, and cloud subscription. No computer is required afterward.
+Use a standard 5 V USB adapter, with good 2.4 GHz Wi-Fi coverage and Bluetooth range to the fan. Keep your Hubspace switches online. Allow a minute or two after power-up for Wi-Fi, time synchronization, authentication, and cloud subscription. No computer is required afterward.
 
-## Important behavior and limitations
+## Behavior and limitations
 
-- **Internet and a genuine online Hubspace receiver remain necessary.** This does not emulate a Hubspace-certified product or replace the receiver's cloud identity.
-- Startup/reconnection loads a baseline without changing the physical fan. Changes missed while disconnected are not replayed. Change a control after reconnecting if you need to reassert a state.
-- The original remote and FanLamp Pro still work directly, but their commands are not listened to by this bridge and will not update Hubspace. Cached brightness assumes the bridge's last brightness is still retained by the fan.
-- BLE advertisements provide no acknowledgement. A successful cloud write and successful radio transmission do not prove physical delivery.
-- Cloud timing varies. Commissioning API tests typically took about 1–2 seconds from starting HTTPS to starting Bluetooth, with an observed outlier near 3.7 seconds. Physical switch latency may differ. The bridge usually began transmitting within roughly 13 ms of routing an event.
-- Each BLE burst lasts 350 ms. Repeated equivalent commands are deduplicated. Turning on at unchanged brightness uses one burst instead of resending brightness first.
-- A receiver can revert a requested state or go offline. This bridge cannot fix that. Writing a fixed speed can also clear Comfort Breeze or turn the receiver on, so mode changes must be separate from fixed-speed writes.
-- Some push handshakes have needed an automatic retry. Long-duration unattended reliability, recovery from revoked credentials, and every network failure mode are not proven.
-- TLS verification is enabled. Root certificates and these unofficial cloud endpoints may need maintenance.
-- Credentials are in ESP32 NVS, **not hardware-encrypted storage**. Do not distribute a full flash dump, provisioned board, or your local configuration/captures without removing personal data.
-- No OTA update, captive portal, GPIO signal reader, or mute toggle is included. Beep behavior is managed with the fan's own remote.
+- Internet, Wi-Fi and online Hubspace dimmers are required. This does not create a new fan device in Hubspace; operate the selected dimmers or their app controls.
+- Startup and reconnection establish a baseline without changing the light. Missed actions are not replayed; change a switch after reconnecting to reassert a state.
+- The original remote and FanLamp Pro still work, but their changes are not observed or reported to Hubspace. Cached brightness assumes the last transmitted brightness remains set.
+- Bluetooth advertisements have no acknowledgement. `TX` means a radio transmission, not confirmed physical delivery.
+- Cloud delays vary. Each Bluetooth burst lasts 350 ms; a first ON may require brightness and ON bursts. No controlled end-to-end latency claim is made for this version.
+- Authentication refreshes automatically. HTTPS work runs on a worker task while the main task services push, routing and Bluetooth. Long-duration unattended reliability and every failure mode are not proven.
+- TLS validation is enabled. The unofficial API and root certificates may need maintenance.
+- Credentials are in unencrypted ESP32 NVS. Never publish full flash dumps or personal configuration/captures.
+- No OTA, captive portal, GPIO signal reader or mute toggle is included. Manage beeps with the fan's remote.
 
 ## Development and tests
 
-Read [architecture and debugging notes](docs/ARCHITECTURE.md) and [security notes](SECURITY.md).
+See [architecture and diagnostics](docs/ARCHITECTURE.md) and [security notes](SECURITY.md).
 
 ```sh
 python -m unittest discover -s tests -p 'test_*.py'
-g++ -std=c++11 tests/test_fan_router.cpp -o test-fan && ./test-fan
-g++ -std=c++11 tests/test_receiver_light.cpp -o test-light && ./test-light
+g++ -std=c++11 tests/test_switch_only.cpp -o test-switch
+./test-switch
 ```
 
-The codec self-test runs 14 synthetic upstream-generated vectors on boot, including breeze. On Linux with the mbedTLS development package, it also runs natively:
+The codec self-test runs 14 synthetic upstream-generated vectors on boot. These include motor protocol vectors retained for codec coverage; the runtime only sends light commands. On Linux with the mbedTLS development package:
 
 ```sh
 g++ -std=c++11 -Iinclude tests/test_codec.cpp -lmbedcrypto -o test-codec
 ./test-codec
 ```
 
-GitHub Actions builds both firmware projects and runs the native and Python tests. Hardware behavior still requires real commissioning.
+GitHub Actions builds the bridge and capture firmware and runs native/Python tests. Hardware behavior requires commissioning. Serial commands are `STATUS`, `PAUSE`, `RESUME`, `REBOOT`, and the provisioning-only `CONFIG`. Pause survives reboot. Switch-event and radio timestamps are included in normal USB diagnostics; do not publish household activity logs unredacted.
 
-Serial commands in the public firmware: `STATUS`, `FAN_STATUS`, `PAUSE`, `RESUME`, `REBOOT`, and the provisioning-only `CONFIG` message. Pause survives reboot. Cloud-mutating commissioning commands were intentionally excluded from the published runtime.
+### Project history
+
+An earlier version used a genuine Hubspace fan receiver and synchronized its app tile. Direct dimmer-to-Bluetooth control made that receiver unnecessary for light control, so its integration was removed. The original implementation remains in [Git history](https://github.com/grdud/hubspace-fanlamp-bridge/commit/007d6c7).
 
 ## Credits and license
 

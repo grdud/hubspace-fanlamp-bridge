@@ -15,10 +15,8 @@ jobs:
       - run: python -m unittest discover -s tests -p 'test_*.py'
       - name: Native policy and codec tests
         run: |
-          g++ -std=c++11 -Wall -Wextra -pedantic tests/test_fan_router.cpp -o /tmp/test-fan
-          /tmp/test-fan
-          g++ -std=c++11 -Wall -Wextra -pedantic tests/test_receiver_light.cpp -o /tmp/test-light
-          /tmp/test-light
+          g++ -std=c++11 -Wall -Wextra -pedantic tests/test_switch_only.cpp -o /tmp/test-switch
+          /tmp/test-switch
           g++ -std=c++11 -Iinclude tests/test_codec.cpp -lmbedcrypto -o /tmp/test-codec
           /tmp/test-codec
       - run: python -m platformio run

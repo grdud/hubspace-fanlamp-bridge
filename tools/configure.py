@@ -1,4 +1,4 @@
-"""Select the receiver/switches and generate an ignored, non-secret configuration."""
+"""Select one or two dimmer switches and generate an ignored, non-secret configuration."""
 import argparse
 import json
 from pathlib import Path
@@ -49,7 +49,7 @@ def choose(items, title, optional=False):
     for n, (name, _) in enumerate(items, 1):
         print(f"{n}. {name}")
     if not items and not optional:
-        raise ValueError("No compatible receiver was discovered")
+        raise ValueError("No compatible switch was discovered")
     selection = int(input("Number: ").strip() or ("0" if optional else "-1"))
     if optional and selection == 0:
         return ""
@@ -58,17 +58,16 @@ def choose(items, title, optional=False):
     return items[selection - 1][1]
 
 
-def render(config, receiver, switch1, switch2, minimum1=1, minimum2=1):
-    for identity in (receiver, switch1, switch2):
+def render(config, switch1, switch2, minimum1=1, minimum2=1):
+    for identity in (switch1, switch2):
         if identity and not re.fullmatch(r"[0-9a-fA-F]{16}", identity):
             raise ValueError("Invalid physical ID")
-    if not receiver or (switch1 and switch1 == switch2):
-        raise ValueError("Receiver required; switches must be distinct")
+    if not switch1 or switch1 == switch2:
+        raise ValueError("Switch 1 required; switches must be distinct")
     if not all(1 <= minimum <= 99 for minimum in (minimum1, minimum2)):
         raise ValueError("Logical brightness minimum must be 1..99")
     return f'''#pragma once
 // Generated locally. Ignored by Git. Contains identities, not account credentials.
-#define BRIDGE_RECEIVER_ID "{receiver}"
 #define BRIDGE_SWITCH_1_ID "{switch1}"
 #define BRIDGE_SWITCH_2_ID "{switch2}"
 #define BRIDGE_BLE_ID {config['id']}u
@@ -91,11 +90,10 @@ def main():
     args = parser.parse_args()
     config = remote_config(args.capture, args.record)
     _, _, devices = login(discover=True)
-    receiver = choose(candidates(devices, "ceiling-fan"), "Select the genuine Hubspace receiver:")
     items = candidates(devices, "switch")
-    switch1 = choose(items, "Optional switch 1:", True)
+    switch1 = choose(items, "Select switch 1:")
     switch2 = choose([x for x in items if x[1] != switch1], "Optional switch 2:", True)
-    text = render(config, receiver, switch1, switch2, args.switch_min1, args.switch_min2)
+    text = render(config, switch1, switch2, args.switch_min1, args.switch_min2)
     target = ROOT / "include/bridge_config.h"
     if target.exists() and input("Replace existing local configuration? [y/N] ").strip().lower() != "y":
         print("Left existing configuration unchanged.")

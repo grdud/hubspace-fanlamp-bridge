@@ -1,63 +1,46 @@
-# Architecture and debugging notes
+# Architecture and diagnostics
 
-## Data path
+## Control path
 
-The receiver provides the genuine Hubspace identity. REST discovery finds its parent, fan child, and light child by physical device ID and device class. Dynamic meta-device IDs are never hard-coded. Initial state is read through REST; changes arrive through a TLS Conclave push stream. Reconnection repeats discovery and seeds state without replaying commands.
+REST discovery selects switch meta-devices by configured physical ID and class `switch`. One switch is required; a second is optional. The bridge needs no ceiling-fan parent or receiver child devices. It reads initial switch power, brightness, timestamps and availability, then subscribes to the account's TLS Conclave push stream. Reconnection repeats discovery and seeds state without replaying light commands.
 
-Receiver attributes currently interpreted:
+The tested dimmers use raw attribute 10 for power and 20 for brightness. Other products need verification. `light_router.h` compares cloud revisions across two sources; stale reports and repeated fields cannot undo a newer action. The configured logical minimum maps to 1%, and 100 maps to 100%; lower values clamp to 1%. Hardware trim is not necessarily the logical API minimum.
 
-| Raw attribute | Meaning |
-|---|---|
-| 1 | Primary power |
-| 2 | Light power |
-| 3 | Fan power |
-| 4 | Brightness, 0–100 |
-| 6 | Fan speed, 0/25/50/75/100 |
-| 8 | Comfort Breeze, 0/1 |
+The runtime sends no device-state PUTs. It does not synchronize a separate Hubspace light tile or control the motor. App changes to the selected dimmers arrive through the same push path as physical changes.
 
-Optional dimmers use attribute 10 for power and 20 for brightness. The same numbers are not assumed to work on arbitrary Hubspace devices.
+## Bluetooth
 
-The narrow FanLamp V2 sender emits nonconnectable legacy BLE advertisements. The controller identity comes from the user's paired remote capture. It saves the rolling counter before transmission, uses a fresh seed, signs the payload, and performs the protocol's whitening/checksum operations. Configuration supports only the signed `fanlamp_pro_v2/r` profile used in the original project.
+The signed `fanlamp_pro_v2/r` identity comes from a working remote capture. The sender saves its rolling counter before transmission and uses a fresh seed, signature, whitening and checksum.
 
-| Action | Command | Arguments |
+| Light action | Command | Arguments |
 |---|---|---|
-| Light on | `0x10` | zeros |
-| Light off | `0x11` | zeros |
+| On | `0x10` | zeros |
+| Off | `0x11` | zeros |
 | Warm brightness | `0x21` | `0, 0, round(percent * 255 / 100)` |
-| Fan off/speed | `0x31` | `32, speed 0..6, 0` |
-| Native breeze | `0x33` | `2, 0, 0` |
 
-Turning breeze off sends a fixed-speed command. While breeze stays enabled, receiver speed fluctuations do not cancel the native mode. Fan power OFF wins over any breeze setting.
-
-## Why there is acknowledgement tracking
-
-A light state write is not atomic on the event stream. Brightness, primary power, and light power can arrive separately and out of order. Combining one fresh field with stale fields caused an OFF command to be followed by an unintended ON.
-
-`receiver_light.h` tracks expected acknowledgements per field, using a bounded eight-entry journal and a 15-second window. Genuine updates are applied as field changes against the current commanded light state. `light_router.h` arbitrates among the receiver and optional switches using their cloud revisions. Stale snapshots and repeated fields must not take control back from a newer source.
-
-Switch commands immediately reach BLE. A separate light-child PUT updates the app tile. Its completion carries a generation number, so an older request cannot clear a newer pending update. Duplicate switch reports neither resend identical BLE commands nor restart the app-sync deadline. OFF updates omit brightness because changing brightness can turn some receivers on.
+Each advertisement burst lasts 350 ms. Equivalent power and warm-channel values are deduplicated. Unknown brightness after startup is explicitly set on the first ON. There is no acknowledgement or observation of independent remote changes.
 
 ## Responsiveness and memory
 
-The first standalone version responded well, but adding five blocking REST polls plus synchronous synchronization requests introduced multi-second stalls. Routine live polling was removed. Blocking HTTPS work now runs in a worker task while the main task services push events, routing, BLE, and heartbeats.
-
-The ESP32-C3 also encountered TLS allocation failures despite apparently adequate total free heap. Smaller filtered push documents and allocating the token-response document after the handshake reduced peak pressure. Total free heap and the largest available block both matter. Normal tests subsequently completed repeated token renewals and cloud writes without those failures; this is not a long-term reliability guarantee.
-
-Do not replace NimBLE with a larger Bluetooth stack without measuring memory usage. Do not disable TLS validation to make memory errors disappear. Avoid concurrent HTTP jobs; current cloud work is serialized, with live control serviced during each job.
+There is no routine REST polling. Authentication and initial HTTP work run in a worker task; the main task continues servicing live control and heartbeats. JSON filtering and delayed token-buffer allocation limit TLS memory pressure. HTTPS jobs remain serialized. Keep TLS validation enabled and measure both free heap and largest free blocks when diagnosing allocation failures.
 
 ## Diagnostics
 
-- `READY_BASELINE`: initial state loaded; no physical command was replayed.
-- `TOKEN_REFRESHED`: REST authentication renewed without intentionally tearing down push.
-- `EVENT light_request` / `EVENT fan_request`: routed intent.
-- `EVENT TX_BEGIN` / `TX`: radio start/end; not a fan acknowledgement.
-- `APP_SYNC http=200`: cloud accepted a light-tile update.
-- `CLOUD_JOB duration_ms`: HTTP work duration, separate from local control responsiveness.
-- `HTTP_ERROR ... tls=-32512`: TLS allocation failure in the pinned stack.
-- `PUSH_HELLO`, `PUSH_TIMEOUT`, `RETRY`: subscription recovery; intermittent hello retries have been observed.
+Run `python tools/monitor.py --port COM3 --seconds 120`.
 
-Logs contain device identifiers and may contain information about household activity. Keep logs local and redact them before sharing an issue. Never post full Hubspace discovery, account tokens, or NVS dumps.
+- `DISCOVERED_SWITCH_ONLY`: at least one configured switch was found.
+- `READY_SWITCH_ONLY`: push connected and initial baseline established without replay.
+- `EVENT switch=... ms=...`: switch event processed on the ESP clock.
+- `EVENT light_request`: routed intent and cloud revision.
+- `EVENT TX_BEGIN` / `TX`: radio start/end, not physical acknowledgement.
+- `TOKEN_REFRESHED`: authentication renewed while preserving push.
+- `CLOUD_JOB duration_ms`: HTTP duration.
+- `PUSH_HELLO`, `PUSH_TIMEOUT`, `RETRY`: subscription recovery.
 
-## Reproducibility limits
+Subtract switch-event time from TX_BEGIN for local routing-to-radio delay. This excludes physical button-to-cloud delivery, and events queued during a BLE burst may be processed later. Do not interpret it as end-to-end latency.
 
-The public tree keeps the runtime behavior but replaces the original physical/controller IDs with an ignored local header, uses synthetic codec vectors, defaults dimmer mapping to logical 1–100%, and replaces installation-specific provisioning with explicit prompts. It is not a byte-for-byte copy of the original flashed binary. Public-source compilation and automated tests do not substitute for commissioning on a new fan.
+Logs contain household activity and device identifiers; keep them local and redact before sharing. Never publish discovery exports, tokens or NVS dumps.
+
+## Validation boundary
+
+Switch-only behavior was physically confirmed in the original installation. The public tree uses ignored local identity configuration, synthetic codec vectors and explicit credential prompts. It is not byte-for-byte identical to the installed binary. Automated builds and tests do not establish compatibility with a new fan or switch.

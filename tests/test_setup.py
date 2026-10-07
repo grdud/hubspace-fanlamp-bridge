@@ -16,22 +16,26 @@ class SetupTests(unittest.TestCase):
             path = Path(directory)/"capture.jsonl"
             path.write_text(json.dumps(row)+"\n")
             parsed = remote_config(path, 4)
-            text = render(parsed, "1111111111111111", "", "")
+            text = render(parsed, "1111111111111111", "")
             self.assertIn("#define BRIDGE_BLE_ID 305419896u", text)
             self.assertIn("#define BRIDGE_SWITCH_1_MIN 1", text)
+            self.assertNotIn("RECEIVER", text)
             row["matches"][0]["codec"] = "fanlamp_pro_v1"
             path.write_text(json.dumps(row)+"\n")
             with self.assertRaises(ValueError): remote_config(path, 4)
 
     def test_bad_parameters_and_injected_ids_rejected(self):
         config = dict(id=1,index=0,tx_count=0)
-        with self.assertRaises(ValueError):render(config, '"\n#define BAD 1', "", "")
-        with self.assertRaises(ValueError):render(config,"1111111111111111","2222222222222222","2222222222222222")
-        with self.assertRaises(ValueError):render(config,"1111111111111111","","",100,1)
+        with self.assertRaises(ValueError):render(config, '"\n#define BAD 1', "")
+        with self.assertRaises(ValueError):render(config,"2222222222222222","2222222222222222")
+        with self.assertRaises(ValueError):render(config,"1111111111111111","",100,1)
+
+    def test_switch_required(self):
+        with self.assertRaises(ValueError):render(dict(id=1,index=0,tx_count=0),"","")
 
     def test_only_valid_unique_physical_devices_are_selectable(self):
-        item = dict(deviceId="1111111111111111", friendlyName="Demo",description=dict(device=dict(deviceClass="ceiling-fan")))
-        self.assertEqual(candidates([item,item,{"deviceId":"bad"}],"ceiling-fan"),[("Demo","1111111111111111")])
+        item = dict(deviceId="1111111111111111", friendlyName="Demo",description=dict(device=dict(deviceClass="switch")))
+        self.assertEqual(candidates([item,item,{"deviceId":"bad"}],"switch"),[("Demo","1111111111111111")])
 
 
 if __name__ == "__main__":unittest.main()
